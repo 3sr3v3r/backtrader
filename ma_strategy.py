@@ -1,5 +1,6 @@
 import backtrader as bt
 from datetime import datetime
+import pandas as pd
 
 
 class MaStrategy(bt.Strategy):
@@ -7,11 +8,11 @@ class MaStrategy(bt.Strategy):
     This strategy contains some additional methods that can be used to calcuate
     whether a position should be subject to a margin close out from Oanda.
     '''
-    params = (('size', 5000), ('ma_long', 150), ('ma_mid', 25), ('ma_short', 6))
+    params = (('size', 5000), ('ma_long', 100), ('ma_mid', 12), ('ma_short', 4), ('sl', 0.9995))
 
     def log(self, txt, dt=None):
         ''' Logging function fot this strategy'''
-        dt = dt or datetime.combine(self.data.datetime.date(),self.data.datetime.time())
+        dt = dt or datetime.combine(self.data.datetime.date(), self.data.datetime.time())
         print('%s, %s' % (dt.isoformat(), txt))
 
     def __init__(self):
@@ -22,12 +23,17 @@ class MaStrategy(bt.Strategy):
         self.execution_price = 0
         self.execution_size = 0
         self.execution_direction = 0
+        self.direction = None
         self.signal = None
+        self.sl = self.p.sl
+        self.order_number = 0
+        column_names = ["datetime", "profit"]
+        self.trade_overview = pd.DataFrame(columns=column_names)
 
         self.rsi = bt.indicators.RSI_Safe(self.dataclose)
-        self.ma_long = bt.indicators.MovingAverageSimple(self.data1.close, period=self.p.ma_long)
-        self.ma_mid = bt.indicators.MovingAverageSimple(self.data1.close, period=self.p.ma_mid)
-        self.ma_short = bt.indicators.MovingAverageSimple(self.data1.close, period=self.p.ma_short)
+        self.ma_long = bt.indicators.MovingAverageSimple(self.data0.close, period=self.p.ma_long)
+        self.ma_mid = bt.indicators.MovingAverageSimple(self.data0.close, period=self.p.ma_mid)
+        self.ma_short = bt.indicators.MovingAverageSimple(self.data0.close, period=self.p.ma_short)
 
         # Indicators for the plotting show
         bt.indicators.ATR(self.datas[0], plot=True)
@@ -47,17 +53,15 @@ class MaStrategy(bt.Strategy):
         header = ['Datetime', 'Open', 'High', 'Low', 'Close', 'Volume']
         print(', '.join(header))
 
-
-
     def next(self):
         bar = len(self.data)
-        self.dt = datetime.combine(self.data.datetime.date(),self.data.datetime.time())
+        self.dt = datetime.combine(self.data.datetime.date(), self.data.datetime.time())
         if self.log_line:
             txt = list()
             txt.append('Data0')
             txt.append('%04d' % len(self.data))
             dtfmt = '%Y-%m-%dT%H:%M:%S'
-            txt.append('%s' % self.data1.datetime.datetime(0).strftime(dtfmt))
+            txt.append('%s' % self.data0.datetime.datetime(0).strftime(dtfmt))
             txt.append('{:f}'.format(self.data0.open[0]))
             txt.append('{:f}'.format(self.data0.high[0]))
             txt.append('{:f}'.format(self.data0.low[0]))
@@ -79,33 +83,33 @@ class MaStrategy(bt.Strategy):
                 else:
                     self.direction = None
 
-                if self.direction == 'long':
-                    if self.ma_short[-1] < self.ma_mid[-1] and self.ma_short[0] > self.ma_mid[0]:
-                        self.log("LONG!! ma_short: " + str(self.ma_short[-1]) + "ma_mid: " + str(self.ma_mid[-1]))
+            if self.direction == 'long':
+                if self.ma_short[0] < self.ma_mid[0]:
+                    if  (self.ma_mid[-1] - self.ma_short[-1]) >  (self.ma_mid[0] - self.ma_short[0]):
                         self.signal = 'long'
-                if self.direction == 'short':
-                    if self.ma_short[-1] > self.ma_mid[-1] and self.ma_short[0] < self.ma_mid[0]:
-                        self.log("SHORT!! ma_short: " + str(self.ma_short[-1]) + "ma_mid: " + str(self.ma_mid[-1]))
+            if self.direction == 'short':
+                if self.ma_short[0] > self.ma_mid[0]:
+                    if (self.ma_short[-1] - self.ma_mid[-1]) > (self.ma_short[0] - self.ma_mid[0]):
                         self.signal = 'short'
 
             if self.signal == 'long':
                 # self.log('BUY TIME!!!')
                 self.cash_before = self.broker.getcash()
-                #self.log('Position open: %s.' % self.position)
+                # self.log('Position open: %s.' % self.position)
                 size = self.p.size / self.dataclose[0]
                 self.order = self.buy(size=size)
                 self.execution_direction = "long"
-                self.log('Size =  %.2f' % size)
+                # self.log('Size =  %.2f' % size)
                 self.order.addinfo(name='Entry')
                 self.signal = None
             elif self.signal == 'short':
-                #self.log('SELL TIME!!!')
-                #self.log('Position open: %s.' % self.position)
+                # self.log('SELL TIME!!!')
+                # self.log('Position open: %s.' % self.position)
                 self.cash_before = self.broker.getcash()
                 size = self.p.size / self.dataclose[0]
                 self.order = self.sell(size=size)
                 self.execution_direction = "short"
-                self.log('Size =  %.2f' % size)
+                # self.log('Size =  %.2f' % size)
                 self.order.addinfo(name='Entry')
                 self.signal = None
         else:
@@ -126,36 +130,43 @@ class MaStrategy(bt.Strategy):
                 close.addinfo(name='MCO')
 
             elif self.execution_direction == 'long':
-                if (self.dataclose[0] / self.execution_price) >= 1.03:
-                    self.log('Take profit LONG')
-                    self.log('Execution price: {}'.format(self.execution_price))
-                    self.log('Closing price: {}'.format(self.dataclose[0]))
-                    self.log('Profit / Loss: {}'.format(self.dataclose[0] / self.execution_price))
-                    self.order = self.close()
-                    self.order.addinfo(name='Close')
-                elif (self.dataclose[0] / self.execution_price) <= 0.97:
+                if (self.dataclose[0] / self.execution_price) > 1:
+                    if self.dataclose[0] / self.execution_price < self.sl and self.rsi > 50:
+                        self.order = self.close()
+                        self.log('SL:' + str(self.sl))
+                        self.order.addinfo(name='Close')
+                        self.sl = self.p.sl
+                    else:
+                        self.sl = self.p.sl + ((self.dataclose[0] / self.execution_price) - 1)
+                elif (self.dataclose[0] / self.execution_price) <= self.sl and self.rsi < 50:
                     self.log('Stop loss LONG')
-                    self.log('Execution price: {}'.format(self.execution_price))
-                    self.log('Closing price: {}'.format(self.dataclose[0]))
-                    self.log('Profit / Loss: {}'.format(self.dataclose[0] / self.execution_price))
+                    self.log('SL:' + str(self.sl))
+                    # self.log('Execution price: {}'.format(self.execution_price))
+                    # self.log('Closing price: {}'.format(self.dataclose[0]))
+                    # self.log('Profit / Loss: {}'.format(self.dataclose[0] / self.execution_price))
                     self.order = self.close()
                     self.order.addinfo(name='Close')
+                    self.sl = self.p.sl
+
 
             elif self.execution_direction == 'short':
-                if (self.execution_price / self.dataclose[0]) >= 1.03:
-                    self.log('Take profit SHORT')
-                    self.log('Execution price: {}'.format(self.execution_price))
-                    self.log('Closing price: {}'.format(self.dataclose[0]))
-                    self.log('Profit / Loss: {}'.format(self.execution_price / self.dataclose[0]))
-                    self.order = self.close()
-                    self.order.addinfo(name='Close')
-                elif (self.execution_price / self.dataclose[0])  <= 0.97 :
+                if (self.execution_price / self.dataclose[0]) > 1:
+                    if self.execution_price / self.dataclose[0] < self.sl and self.rsi < 50:
+                        self.log('SL:' + str(self.sl))
+                        self.order = self.close()
+                        self.order.addinfo(name='Close')
+                        self.sl = self.p.sl
+                    else:
+                        self.sl = self.p.sl + ((self.execution_price / self.dataclose[0]) - 1)
+                elif (self.execution_price / self.dataclose[0]) <= self.sl and self.rsi > 50:
                     self.log('Stop loss SHORT')
-                    self.log('Execution price: {}'.format(self.execution_price))
-                    self.log('Closing price: {}'.format(self.dataclose[0]))
+                    self.log('SL:' + str(self.sl))
+                    # self.log('Execution price: {}'.format(self.execution_price))
+                    # self.log('Closing price: {}'.format(self.dataclose[0]))
                     self.log('Profit / Loss: {}'.format(self.execution_price / self.dataclose[0]))
                     self.order = self.close()
                     self.order.addinfo(name='Close')
+                    self.sl = self.p.sl
 
         self.count += 1
 
@@ -163,10 +174,12 @@ class MaStrategy(bt.Strategy):
         if trade.isclosed:
             print('{}: Trade closed '.format(self.dt))
             print('{}: PnL Gross {}, Net {}\n\n'.format(self.dt,
-                                                round(trade.pnl,2),
-                                                round(trade.pnlcomm,2)))
+                                                        round(trade.pnl, 2),
+                                                        round(trade.pnlcomm, 2)))
+            self.trade_overview.at[self.order_number, "profit"] = round(trade.pnl, 2)
+            self.order_number += 1
 
-    def notify_order(self,order):
+    def notify_order(self, order):
         if order.status in [order.Submitted, order.Accepted]:
             # Buy/Sell order submitted/accepted to/by broker - Nothing to do
             return
@@ -181,8 +194,10 @@ class MaStrategy(bt.Strategy):
             if 'name' in order.info:
                 if order.info['name'] == 'Entry':
                     print('{}: Entry Order Completed '.format(self.dt))
-                    print('{}: Order Executed Price: {}, Executed Size {}'.format(self.dt,self.execution_price,self.execution_size))
-                    print('{}: Position Value: {} Margin Used: {}'.format(self.dt,self.total_value,self.margin))
+                    print('{}: Order Executed Price: {}, Executed Size {}'.format(self.dt, self.execution_price,
+                                                                                  self.execution_size))
+                    print('{}: Position Value: {} Margin Used: {}'.format(self.dt, self.total_value, self.margin))
+                    self.trade_overview.at[self.order_number, "datetime"] = self.dt
                 elif order.info['name'] == 'MCO':
                     print('{}: WARNING: Margin Close Out'.format(self.dt))
                 else:
@@ -206,7 +221,7 @@ class MaStrategy(bt.Strategy):
         margin_used: Initial margin
         '''
 
-        if value < (margin_used /2):
+        if value < (margin_used / 2):
             return True
         else:
             return False
