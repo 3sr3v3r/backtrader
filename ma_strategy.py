@@ -8,14 +8,14 @@ class MaStrategy(bt.Strategy):
     This strategy contains some additional methods that can be used to calcuate
     whether a position should be subject to a margin close out from Oanda.
     '''
-    params = (('size', 5000), ('ma_long', 100), ('ma_mid', 12), ('ma_short', 4), ('sl', 0.9995))
-
+    params = (('size', 5000), ('ma_long', 100), ('ma_mid', 12), ('ma_short', 4), ('sl', 0.9995), ('check_time', True))
     def log(self, txt, dt=None):
         ''' Logging function fot this strategy'''
         dt = dt or datetime.combine(self.data.datetime.date(), self.data.datetime.time())
         print('%s, %s' % (dt.isoformat(), txt))
 
     def __init__(self):
+        self.trading_hours = set([6, 8, 9, 12])
         self.order = None
         self.log_line = False
         self.dataclose = self.datas[0].close
@@ -53,6 +53,11 @@ class MaStrategy(bt.Strategy):
         header = ['Datetime', 'Open', 'High', 'Low', 'Close', 'Volume']
         print(', '.join(header))
 
+    def is_trade_time(self, hour):
+        if self.p.check_time:
+            if hour in self.trading_hours:
+                return True
+
     def next(self):
         bar = len(self.data)
         self.dt = datetime.combine(self.data.datetime.date(), self.data.datetime.time())
@@ -86,11 +91,13 @@ class MaStrategy(bt.Strategy):
             if self.direction == 'long':
                 if self.ma_short[0] < self.ma_mid[0]:
                     if  (self.ma_mid[-1] - self.ma_short[-1]) >  (self.ma_mid[0] - self.ma_short[0]):
-                        self.signal = 'long'
+                        if self.is_trade_time(self.dt.hour):
+                            self.signal = 'long'
             if self.direction == 'short':
                 if self.ma_short[0] > self.ma_mid[0]:
                     if (self.ma_short[-1] - self.ma_mid[-1]) > (self.ma_short[0] - self.ma_mid[0]):
-                        self.signal = 'short'
+                        if self.is_trade_time(self.dt.hour):
+                            self.signal = 'short'
 
             if self.signal == 'long':
                 # self.log('BUY TIME!!!')
