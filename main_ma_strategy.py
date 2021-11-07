@@ -5,14 +5,15 @@ import datetime  # For datetime objects
 import os.path  # To manage paths
 import sys  # To find out the script name (in argv[0])
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import pandas as pd
+from tabulate import tabulate
 
 # Import the backtrader platform
 import backtrader as bt
 import backtrader.feeds as btfeeds
 import backtrader.analyzers as btanalyzers
 from ma_strategy import MaStrategy
+from trade_list import trade_list
 
 
 if __name__ == '__main__':
@@ -47,6 +48,7 @@ if __name__ == '__main__':
         for row in print_list:
             print(row_format.format('', *row))
 
+    optimization = False
     optimizations = 0
     dataframe_collection = {}
 
@@ -55,14 +57,21 @@ if __name__ == '__main__':
 
     # Add a strategy
     # cerebro.addstrategy(MaStrategy)
-    strats = cerebro.optstrategy(
-        MaStrategy,
-        ma_mid=range(22, 23),
-        ma_short=range(5, 6)
-        )
+    if optimization:
+        strats = cerebro.optstrategy(
+            MaStrategy,
+            ma_mid=range(22, 23),
+            ma_short=range(5, 6)
+            )
+    else:
+        cerebro.addstrategy(MaStrategy)
 
-    # Analyzer
-    cerebro.addanalyzer(btanalyzers.TradeAnalyzer, _name='mytrade')
+    if optimization:
+        # Analyzer
+        cerebro.addanalyzer(btanalyzers.TradeAnalyzer, _name='mytrade')
+    else:
+        # add analyzers
+        cerebro.addanalyzer(trade_list, _name='trade_list')
 
     # Datas are in a subfolder of the samples. Need to find where the script is
     # because it could have been called from anywhere
@@ -73,7 +82,7 @@ if __name__ == '__main__':
     data = btfeeds.GenericCSVData(
         dataname=datapath,
         # Do not pass values before this date
-        fromdate=datetime.datetime(2019, 1, 1),
+        fromdate=datetime.datetime(2021, 3, 1),
         # Do not pass values before this date
         todate=datetime.datetime(2021, 10, 7),
         # Do not pass values after this date
@@ -123,7 +132,10 @@ if __name__ == '__main__':
 
 
     # Run over everything
-    stratruns = cerebro.run(preload=True, maxcpus=4, optreturn=False)
+    if optimization:
+        stratruns = cerebro.run(preload=True, maxcpus=4, optreturn=False)
+    else:
+        strats = cerebro.run(tradehistory=True)
 
     # Print out the final result
     print('Final Portfolio Value: %.2f' % cerebro.broker.getvalue())
@@ -134,34 +146,44 @@ if __name__ == '__main__':
     print('Final Portfolio Value: ${}'.format(portvalue))
     print('P/L: ${}'.format(pnl))
 
-    print('==================================================')
-    for stratrun in stratruns:
-        print('**************************************************')
-        for strat in stratrun:
-            print('--------------------------------------------------')
-            print(strat.p._getkwargs())
-            analysis = strat.analyzers.mytrade.get_analysis()
-            printTradeAnalysis(analysis)
-            dataframe_collection[optimizations] = strat.trade_overview
-            #for key, value in analysis.items():
-            #    print("Key: {}, Value: {}".format(key, value))
-            optimizations += 1
+    if optimization:
+        print('==================================================')
+        for stratrun in stratruns:
+            print('**************************************************')
+            for strat in stratrun:
+                print('--------------------------------------------------')
+                print(strat.p._getkwargs())
+                analysis = strat.analyzers.mytrade.get_analysis()
+                printTradeAnalysis(analysis)
+                dataframe_collection[optimizations] = strat.trade_overview
+                #for key, value in analysis.items():
+                #    print("Key: {}, Value: {}".format(key, value))
+                optimizations += 1
 
-    print('==================================================')
+        print('==================================================')
 
-    for optimization_run in dataframe_collection:
-        trade_overview = dataframe_collection[optimization_run]
-        print(trade_overview.dtypes)
+        for optimization_run in dataframe_collection:
+            trade_overview = dataframe_collection[optimization_run]
+            trade_overview["datetime"] = pd.to_datetime(trade_overview["datetime"], infer_datetime_format=True).dt.hour
+            trade_overview = trade_overview.groupby(trade_overview["datetime"]).sum().reset_index()
+            print(trade_overview)
+            trade_overview.plot(kind='bar', x='datetime', y='profit')
+            plt.show()
+    else:
+
+        # get analyzers data
+        trade_list = strats[0].analyzers.trade_list.get_analysis()
+        print(tabulate(trade_list, headers="keys"))
+        trade_overview = strats[0].trade_overview
         trade_overview["datetime"] = pd.to_datetime(trade_overview["datetime"], infer_datetime_format=True).dt.hour
         trade_overview = trade_overview.groupby(trade_overview["datetime"]).sum().reset_index()
         print(trade_overview)
         trade_overview.plot(kind='bar', x='datetime', y='profit')
         plt.show()
 
-        # plot it
+        #Plot the result
+        cerebro.plot(style='candle')
 
 
 
-    # Plot the result
-    #cerebro.plot(style='candle')
 

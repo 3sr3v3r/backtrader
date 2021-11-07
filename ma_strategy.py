@@ -8,14 +8,14 @@ class MaStrategy(bt.Strategy):
     This strategy contains some additional methods that can be used to calcuate
     whether a position should be subject to a margin close out from Oanda.
     '''
-    params = (('size', 5000), ('ma_long', 100), ('ma_mid', 12), ('ma_short', 4), ('sl', 0.9995), ('check_time', True))
+    params = (('size', 5000), ('ma_long', 100), ('ma_mid', 22), ('ma_short', 5), ('sl', 0.9995), ('check_time', False))
     def log(self, txt, dt=None):
         ''' Logging function fot this strategy'''
         dt = dt or datetime.combine(self.data.datetime.date(), self.data.datetime.time())
         print('%s, %s' % (dt.isoformat(), txt))
 
     def __init__(self):
-        self.trading_hours = set([6, 8, 9, 12])
+        self.trading_hours = set([0, 1, 3, 5, 6, 7, 9, 10, 12, 13, 16, 21, 22, 23])
         self.order = None
         self.log_line = False
         self.dataclose = self.datas[0].close
@@ -57,6 +57,8 @@ class MaStrategy(bt.Strategy):
         if self.p.check_time:
             if hour in self.trading_hours:
                 return True
+        else:
+            return True
 
     def next(self):
         bar = len(self.data)
