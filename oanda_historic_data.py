@@ -5,19 +5,16 @@ import pandas as pd
 import json
 
 #instruments = ['XAU_USD','NL25_EUR']
-from oandapyV20.endpoints.instruments import Instruments
-from v20.account import Account
-
 instruments = ['NAS100_USD']
 granularity = "M1"
-_from = "2021-07-01T00:00:00Z"
+_from = "2019-01-01T00:00:00Z"
 #_from = "2021-05-01T00:00:00Z"
-_to= "2021-10-07T00:00:00Z"
+_to= "2021-01-14T00:00:00Z"
 price = "A"
 # 'A' stands for ask price; if you want to get Bid use 'B' instead or 'AB' for both.
 
-download = False
-show_instruments = True
+download = True
+show_instruments = False
 
 with open("config.json", "r") as file:
     config = json.load(file)
@@ -29,7 +26,9 @@ client = API(access_token=token)
 if show_instruments:
     r = accounts.AccountInstruments(accountID=accountID)
     rv = client.request(r)
-    print(json.dumps(rv, indent=2))
+    dataframe = pd.json_normalize(rv, record_path=['instruments'])
+    dataframe.to_csv('./data/oanda_instruments.csv', index=False)
+
 
 if download:
     params = {
